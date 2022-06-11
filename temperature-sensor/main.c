@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <pthread.h>
+#include <json-c/json.h>
 
 
 //-----------ADC related variables and functions-----------------
@@ -37,19 +38,39 @@ void converToCelsius();
 void getAllTempFromFile();
 
 
-
 //----------------POST request variables and functions-----------------
 
 //Sleep value in thread pubToPOST to send data every two minutes
 const int post_adc_data_frequnecy = 1;
 
-void initpubToPOSTTimer();
-void *pubToPOST(void *vargp);
+typedef struct TemperatureMeasurement{
+        char start[20];
+        char end[20];
+        float min;
+        float max;
+        float average;
+    }temperatureMeasurement;
 
+void initpubToPOSTTimer();
+void *pubToPOST(void * vargp);
+void createJSON(temperatureMeasurement * measurement, json_object * object);
+
+//---------------Main----------------------------
 
 int main()
 {
-    struct ADC adc;
+    temperatureMeasurement ms;
+    strcpy(ms.start, "starting");
+    strcpy(ms.end, "stopping");
+    ms.average = 25.0;
+    ms.min = -50.3;
+    ms.max = 43.1;
+
+    json_object *object;
+    createJSON(&ms, object);
+  
+
+
     getAllTempFromFile();
 
     initreadADCTimer();
@@ -64,6 +85,20 @@ int main()
     return 0;
 }
 
+void createJSON(temperatureMeasurement * measurement, json_object * object){
+    char buffer[1024];
+    sprintf(buffer, "{\"time\": { \"start\": \"%s\",  \
+	            	              \"end\": \"%s\"}, \
+	                    \"min\": \"%f\", \
+	                    \"max\": \"%f\",  \
+	                    \"average\": \"%f\"}" \
+                , measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
+
+    json_object *root = json_tokener_parse(buffer);
+    printf("%lu", sizeof(root));
+    
+
+}
 
 int initreadADCTimer(){
     //Create mutex to block write access
@@ -108,7 +143,7 @@ void *readADCTimer(void *vargp) {
 
     int i = 0;
     uint8_t samples_available = 0x01;
-    
+
     while(samples_available){
         
         //The adc_ready_flag is used to reduce time used in thread, and improve determinism of
