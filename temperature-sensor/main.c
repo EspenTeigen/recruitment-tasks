@@ -6,24 +6,25 @@
 #include <stdint.h>
 #include <string.h>
 #include <pthread.h>
-#include <json-c/json.h>
 #include <math.h>
 #include <curl/curl.h>
 
 const char * POST_URL = "http://localhost:5000/api/temperature";
-const char * FALLBACK_URL = "http://localhost:5000/api/temperature/missing";
+const char * FALLBACK_URL = "http://localhost:5000/api/missing";
+
 
 typedef struct TemperatureMeasurement{
         char start[20];
-        double sizeOfStart;       
+        int sizeOfStart;       
         char end[20];
-        double sizeOfEnd;
+        int sizeOfEnd;
         float min;
         float max;
         float average;
         float sum;
         int number_of_measurements;
     }temperatureMeasurement;
+
 
 
 //-----------ADC related variables and functions-----------------
@@ -49,28 +50,25 @@ int initReadADCTimer();
 void *readADCTimer(void *vargp);
 void convertToCelsius(temperatureMeasurement * measurement);
 //Read adc values from temperature.txt and stores it in adc_values_from_file
-void getAllTempFromFile();
+void getAllADCTemperatureFromFile();
 
 
 //----------------POST request variables and functions-----------------
 
 //Sleep value in thread pubToPOST to send data every two minutes
-const int post_adc_data_frequency = 10;
+const int post_adc_data_frequency = 3;
 //Toggled by pubToPOST thread every two minutes to signal that is
 //time to send data
 uint8_t sendDataPOST = 0x00;
 //Lock during work on shared memory in thread
 static pthread_mutex_t post_lock;
 
-//Store up to 10 last values of average, max and min calculations from 
-//adc
-temperatureMeasurement tm_stack[10];
 
 int initpubToPOSTTimer();
 void *pubToPOST(void * vargp);
-void createJSON(temperatureMeasurement * measurement, json_object * object);
-void getDateTimeISOISO8601(char * dateTime, int sizeDateTime);
-
+void createJSON(temperatureMeasurement * measurement, char * string, int size_of_string);
+void getDateTimeISO8601(char * dateTime, int sizeDateTime);
+int POSTMeasurement(char * measurement_json, int size);
 
 
 //---------------Main----------------------------
@@ -82,8 +80,8 @@ int main()
     tm.number_of_measurements = 0;
     tm.sizeOfStart = sizeof(tm.start);
     tm.sizeOfEnd = sizeof(tm.end);
-    
-    getAllTempFromFile();
+
+    getAllADCTemperatureFromFile();
 
     initReadADCTimer();
 
@@ -105,44 +103,45 @@ int main()
             tm.number_of_measurements = 0;
 
             //Store end time
-            getDateTimeISOISO8601(tm_copy.end, tm_copy.sizeOfEnd);
+            getDateTimeISO8601(tm_copy.end, tm_copy.sizeOfEnd);
 
-            
             //calculate average
             tm_copy.average = tm_copy.sum / tm_copy.number_of_measurements;
 
             //Reset flag that signals it is time to send data
             sendDataPOST = 0x00;
 
+            //construct json
+            char measurement_json[2048];
+            createJSON(&tm_copy, measurement_json, sizeof(measurement_json));
+            //printf("%s\n", measurement_json);
 
-            //Construct json 
-            json_object * json_object;
-            char buffer[1024];
-            sprintf(buffer, "{\"time\": { \"start\": \"%s\",  \
-	                    	              \"end\": \"%s\"}, \
-	                            \"min\": \"%.2f\", \
-	                            \"max\": \"%.2f\",  \
-	                            \"average\": \"%.2f\"}" \
-                        , tm_copy.start, tm_copy.end, tm_copy.min, tm_copy.max, tm_copy.average);
-
-            json_object = json_tokener_parse(buffer);
-            printf("The json object to string:\n\n%s\n", json_object_to_json_string_ext(json_object, JSON_C_TO_STRING_PRETTY));
+            POSTMeasurement(measurement_json, sizeof(measurement_json));
+            
         }
     }
     return 0;
 }
 
 
-void createJSON(temperatureMeasurement * measurement, json_object * object){
-    char buffer[1024];
-    sprintf(buffer, "{\"time\": { \"start\": \"%s\",  \
-	            	              \"end\": \"%s\"}, \
-	                    \"min\": \"%f\", \
-	                    \"max\": \"%f\",  \
-	                    \"average\": \"%f\"}" \
-                , measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
+void createJSON(temperatureMeasurement * measurement, char * string, int size_of_string){
+    char buffer[size_of_string];
 
-    object = json_tokener_parse(buffer);
+    //sprintf(buffer, "{\"time\": { \"start\": \"%s\",  \
+	//            	              \"end\": \"%s\"}, \
+	//                    \"min\": \"%.2f\", \
+	//                    \"max\": \"%.2f\",  \
+	//                    \"average\": \"%.2f\"}"      
+    //            ,measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
+
+    sprintf(buffer, "{\n	\"time\": {\n		\"start\": \"%s\", \n		\"end\": \"%s\" \n	},\n	\"min\": %.2f, \n	\"max\": %.2f, \n	\"avg\": %.2f\n}",
+            measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
+
+
+    memcpy(string, buffer, size_of_string);
+
+    printf("%s\n", string);
+   
 }
 
 int initReadADCTimer(){
@@ -172,7 +171,7 @@ int initpubToPOSTTimer(){
     return 0;
 }
 
-void getAllTempFromFile(){
+void getAllADCTemperatureFromFile(){
 
     char line[5];
     FILE *fileptr = fopen("temperature.txt", "r");
@@ -192,15 +191,16 @@ void getAllTempFromFile(){
 
 
 
-//Triggers the adc_ready flag and stores value everytime a "sample" is ready
+//Thread to read samples from ADC
 void *readADCTimer(void *vargp) {
 
     int i = 0;
-
+    //Runs through all samples and roll over to beginning when end is reach
+    //length of array is hardcoded since this will not change
+    //In a situation I would use an interrupt vector to detect when ADC is ready
     while(1){
-        
         //The adc_ready_flag is used to reduce time used in thread, and improve determinism of
-        //sample collection time
+        //sample collection time since time used to convert data does not add to the cycle time
         if(i < N_ANALOG_VALUES) {
 
             pthread_mutex_lock(&adc_lock);
@@ -231,7 +231,7 @@ void convertToCelsius(temperatureMeasurement * measurement){
         measurement->max = temperature;
         measurement->min = temperature;
         //Save dateTime from when we start to sample data
-        getDateTimeISOISO8601(measurement->start, measurement->sizeOfStart);
+        getDateTimeISO8601(measurement->start, measurement->sizeOfStart);
     }
 
     measurement->sum += temperature;
@@ -251,7 +251,7 @@ void *pubToPOST(void *vargp){
     }
 }
 
-void getDateTimeISOISO8601(char * dateTime, int sizeDateTime){
+void getDateTimeISO8601(char * dateTime, int sizeDateTime){
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
 
@@ -259,4 +259,38 @@ void getDateTimeISOISO8601(char * dateTime, int sizeDateTime){
     char buffer[sizeDateTime];
     strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S.000%z", tm);
     memcpy(dateTime, buffer, sizeof(buffer));
+}
+
+
+int POSTMeasurement(char * measurement_json, int size){
+
+    CURL *curl;
+    CURLcode res;
+    char error_buf[CURL_ERROR_SIZE];
+    curl = curl_easy_init();
+    if(curl) {
+        //tell curl that we want to post
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+        //URL to server and api
+        curl_easy_setopt(curl, CURLOPT_URL, POST_URL);
+        //Turn on error feedback so we can catch the 500 error
+        curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+        curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_buf);
+
+        //curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(curl, CURLOPT_DEFAULT_PROTOCOL, "https");
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, measurement_json);
+        res = curl_easy_perform(curl);
+        
+        //Check for error 500, return error if present
+        if(res == CURLE_HTTP_RETURNED_ERROR && strstr(error_buf, "500")){
+            printf("%s\n", error_buf);
+            return 1;
+        }
+    }
+    curl_easy_cleanup(curl);
+    return 0;
 }
