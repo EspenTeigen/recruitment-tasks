@@ -1,0 +1,18 @@
+{
+    "files.associations": {
+        "json.h": "c",
+        "*.ipp": "c",
+        "*.tcc": "c",
+        "bitset": "c",
+        "optional": "c",
+        "algorithm": "c",
+        "random": "c",
+        "istream": "c",
+        "numeric": "c",
+        "streambuf": "c",
+        "type_traits": "c",
+        "tuple": "c",
+        "*.txx": "c"
+    },
+    "ros.distro": "melodic"
+}
