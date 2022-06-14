@@ -9,13 +9,13 @@
 #include <math.h>
 #include <curl/curl.h>
 
-#define MAX_JSON_STRING_SIZE 200
+#define MAX_JSON_STRING_SIZE 150
 #define N_OLD_JSON_STRINGS 10
 
 typedef struct TemperatureMeasurement{
-        char start[20];
+        char start[80];
         int sizeOfStart;       
-        char end[20];
+        char end[80];
         int sizeOfEnd;
         float min;
         float max;
@@ -31,7 +31,7 @@ typedef struct TemperatureMeasurement{
 //Lines of values in temperature.txt
 #define N_ANALOG_VALUES 766
 //Sleep value in thread readADCTimer to sample data every 100ms(100 000us)
-const float adc_sample_frequency = 100000;
+const float ADC_SAMPLE_FREQUENCY =  100000;
 
 
 //Used to store all the values from file to simulate getting data from
@@ -44,12 +44,12 @@ uint16_t single_value_from_adc;
 //used to lock thread so values cannot be changed during data retrieval
 static pthread_mutex_t adc_lock;
 //Start thread and mutex lock
-int initReadADCTimer();
+int initReadADCTimer(char * filename);
 //samples single value from array of samples every 100ms
 void *readADCTimer(void *vargp);
 void convertToCelsius(temperatureMeasurement * measurement);
 //Read adc values from temperature.txt and stores it in adc_values_from_file
-void getAllADCTemperatureFromFile();
+void getAllADCTemperatureFromFile(char * filename);
 
 
 //----------------POST request variables and functions-----------------
@@ -72,7 +72,7 @@ int POSTMeasurement(const char * URL, char * measurement_json, int size);
 //used to store previous json strings that failed to be sent
 typedef struct PreviousJsonString{
     //json string
-    char previous_json_string[MAX_JSON_STRING_SIZE][N_OLD_JSON_STRINGS];
+    char previous_json_string[N_OLD_JSON_STRINGS][MAX_JSON_STRING_SIZE];
     //number of elements inn array
     uint8_t N_errors;
     uint8_t N_elements;
@@ -85,7 +85,6 @@ typedef struct PreviousJsonString{
 int main()
 {
     //----------------Initialization-------------
-    
     //Variable to store ADC data
     temperatureMeasurement tempMeas;
     tempMeas.number_of_measurements = 0;
@@ -97,12 +96,7 @@ int main()
     prevJsonStr.N_errors= 0;
     prevJsonStr.N_elements = 0x00;
 
-    
-
-    //Read in data from file and place in adc_values_from_file
-    getAllADCTemperatureFromFile();
-
-    initReadADCTimer();
+    initReadADCTimer("temperature.txt");
     initpubToPOSTTimer();
    
     //------------Main loop-----------------------------
@@ -134,34 +128,35 @@ int main()
 
             //construct json
             char measurement_json[MAX_JSON_STRING_SIZE];
-            createJSON(&tm_copy, measurement_json, sizeof(measurement_json));
+            createJSON(&tm_copy, measurement_json, MAX_JSON_STRING_SIZE);
             
-
-            //Start to fill upp array with previous measurements
+            //Start to fill up array with previous measurements
             if(prevJsonStr.N_elements < N_OLD_JSON_STRINGS){
                 strcpy(prevJsonStr.previous_json_string[prevJsonStr.N_elements], measurement_json);
                 prevJsonStr.N_elements++;
+
             }
             else{
                 //When array is full, shift array to the right and add new value
                 char buff[MAX_JSON_STRING_SIZE];
                 int i;
-                for(i = 0; i < N_OLD_JSON_STRINGS - 1; i++){
-                    strcpy(buff, prevJsonStr.previous_json_string[i]);
-                    strcpy(prevJsonStr.previous_json_string[i+1], buff);
+                for(i = 1; i < N_OLD_JSON_STRINGS; i++){
 
-                    printf("%s\n\n", prevJsonStr.previous_json_string[i+1]);
-                    printf("----------------- \n\n");
-                    printf("%i\n", i);
-                    printf("----------------- \n\n");
+                    memmove(buff, prevJsonStr.previous_json_string[i-1], strlen(buff));
+                    memmove(prevJsonStr.previous_json_string[i], buff, strlen(prevJsonStr.previous_json_string[i]));
 
                 }
                 strcpy(prevJsonStr.previous_json_string[0], measurement_json);
             }
+
+            int i;
+            for(i = 0; i < prevJsonStr.N_elements; i++){
+                printf("\n%s\n", prevJsonStr.previous_json_string[i]);
+            }
           
 
-            static const char * POST_URL = "http://localhost:5000/api/temperature";
-            static const char * FALLBACK_URL = "http://localhost:5000/api/missing";            
+            static const char * POST_URL = "http://localhos¨t:5000/api/temperature";
+            static const char * FALLBACK_URL = "http://localhost:5000/api/temperature/missing";            
 
             
             if(POSTMeasurement(POST_URL ,measurement_json, sizeof(measurement_json))){
@@ -180,23 +175,23 @@ void createJSON(temperatureMeasurement * measurement, char * string, int size_of
     //Format data to json raw string
     sprintf(buffer, "{\n\"time\": {\n\"start\": \"%s\", \n	\"end\": \"%s\" \n	},\n	\"min\": %.2f, \n	\"max\": %.2f, \n	\"avg\": %.2f\n}",
             measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
+
     memcpy(string, buffer, size_of_string);
    
 }
 
 
 
-int initReadADCTimer(){
+int initReadADCTimer(char * filename){
     //Create mutex to block write access
     if (pthread_mutex_init(&adc_lock, NULL) != 0)
     {
         printf("\n mutex init failed\n");
         return 1;
     }
-
     //Thread to read adc
     pthread_t thread_id_adc;
-    pthread_create(&thread_id_adc, NULL, readADCTimer, NULL);
+    pthread_create(&thread_id_adc, NULL, readADCTimer, filename);
     return 0;
 }
 
@@ -216,10 +211,10 @@ int initpubToPOSTTimer(){
     return 0;
 }
 
-void getAllADCTemperatureFromFile(){
+void getAllADCTemperatureFromFile(char * filename){
 
-    char line[5];
-    FILE *fileptr = fopen("temperature.txt", "r");
+    char line[10];
+    FILE *fileptr = fopen(filename, "r");
     ssize_t read;
 
     if(fileptr == NULL){
@@ -237,9 +232,12 @@ void getAllADCTemperatureFromFile(){
 
 
 //Thread to read samples from ADC
-void *readADCTimer(void *vargp) {
+void *readADCTimer(void *filename) {
 
     int i = 0;
+    //Read in data from file and place in adc_values_from_file
+    getAllADCTemperatureFromFile((char *)filename);
+
     //Runs through all samples and roll over to beginning when end is reach
     //length of array is hardcoded since this will not change
     //In a situation I would use an interrupt vector to detect when ADC is ready
@@ -255,7 +253,7 @@ void *readADCTimer(void *vargp) {
             i++;
             pthread_mutex_unlock(&adc_lock);
             //slow down runtime of thread to 10 
-            usleep(adc_sample_frequency);
+            usleep(ADC_SAMPLE_FREQUENCY);
         }
         else{
         //reset to start reading from beginning of array to simulate 
@@ -312,8 +310,8 @@ void getDateTimeISO8601(char * dateTime, int sizeDateTime){
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     char buffer[sizeDateTime];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S.000%z", tm);
-    memcpy(dateTime, buffer, sizeof(buffer));
+    strftime(buffer, sizeDateTime, "%Y-%m-%dT%H:%M:%S.000%z", tm);
+    strcpy(dateTime, buffer);
 }
 
 

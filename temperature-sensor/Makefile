@@ -1,2 +1,2 @@
 main: main.c
-	gcc -pthread -o main main.c -lm -lcurl
+	gcc -g main.c -o main -pthread -lm -lcurl
