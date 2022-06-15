@@ -92,9 +92,9 @@ int main()
     tempMeas.sizeOfEnd = sizeof(tempMeas.end);
 
     //Struct to keep old measurements and info about sending status
-    previousJsonString prevJsonStr;
-    prevJsonStr.N_errors= 0;
-    prevJsonStr.N_elements = 0x00;
+    previousJsonString failedAttempts;
+    failedAttempts.N_errors= 0;
+    failedAttempts.N_elements = 0x00;
 
     initReadADCTimer("temperature.txt");
     initpubToPOSTTimer();
@@ -136,55 +136,34 @@ int main()
             static const char * POST_URL = "http://localhost:5000/api/temperature";
             static const char * FALLBACK_URL = "http://localhost:5000/api/temperature/missing";            
 
-            //Check if POST failed last time, if it has use fallback server
-            if(prevJsonStr.N_elements > 0) {
-                
-                //String used to store combined strings, make sure there is no residual 
-                //values in memory from last round
+            
+            //Send data to , if it fails, store value and send on the next 
+            //two minute interval
+            if(POSTMeasurement(POST_URL ,measurement_json)){
+               //start to fill up array with old values, increment amount of elements in array       
+                strcpy(failedAttempts.previous_json_string[failedAttempts.N_elements], measurement_json);
+                failedAttempts.N_elements++;
+
+            }
+
+            //When POST request has failed 10 times, send data to /missing, and empty array
+            if(failedAttempts.N_elements >= 10) {
                 char failed_measurement_combined[10*MAX_JSON_STRING_SIZE] = {"\0, \0, \0, \0, \0, \0, \0, \0, \0, \0, "};
                 int i;
-              
-                //Combine all continuose failed attempts
-                for(i = 0; i < prevJsonStr.N_elements; i++){
+                //Combine all failed attempts
+                for(i = 0; i < failedAttempts.N_elements; i++){
                     //Concatenate all strings in array
-                    strcat(failed_measurement_combined, prevJsonStr.previous_json_string[i]);
+                    strcat(failed_measurement_combined, failedAttempts.previous_json_string[i]);
                     strcat(failed_measurement_combined, "\n");
                     //Empty the array space
-                    strcpy(prevJsonStr.previous_json_string[i], "\0");
+                    strcpy(failedAttempts.previous_json_string[i], "\0");
                 }
 
                 //Since strings in array is removed, set counter to zero
-                prevJsonStr.N_elements = 0;
+                failedAttempts.N_elements = 0;
                 //Send combined string to fallback server
                 POSTMeasurement(FALLBACK_URL, failed_measurement_combined);
                 
-            }
-            else if(POSTMeasurement(POST_URL ,measurement_json)){
-                //Send data to temperature, if it fails, store value and send on the next 
-                //two minute interval
-          
-                //start to fill up array with old values, increment amount of elements in array
-                if(prevJsonStr.N_elements < N_OLD_JSON_STRINGS){
-
-                    strcpy(prevJsonStr.previous_json_string[prevJsonStr.N_elements], measurement_json);
-                    prevJsonStr.N_elements++;
-
-                }
-                else{
-                    //When array is full, shift array to the right and add new value
-                    //This way we keep the freshest values, If we want to keep the 
-                    //10 first we could not send or the 10 last depends on the system
-                    //This is an arbitrary choise
-                    char buff[MAX_JSON_STRING_SIZE];
-                    int i;
-                    for(i = 1; i < N_OLD_JSON_STRINGS; i++){
-
-                        strcpy(buff, prevJsonStr.previous_json_string[i-1]);
-                        strcpy(prevJsonStr.previous_json_string[i], buff);
-
-                    }
-                    strcpy(prevJsonStr.previous_json_string[0], measurement_json);
-                }
             }
         }
     }
