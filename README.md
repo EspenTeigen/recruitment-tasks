@@ -26,3 +26,51 @@ There is a makefile and also a tasks.json file if vscode is used. Dependencies a
 
 
 
+# Flow charts
+
+## ADC "interrupt" thread readADCTimer
+
+```mermaid
+flowchart TD;
+    A[init thread]-->B[read values from textfile to array]
+    B --> C[get value from array]
+    C --> D[Set adc flag true]
+    D --> E[sleep 100ms]
+    E --> C
+```
+## POST request thread
+
+```mermaid
+graph TD;
+    Sleep_two_minutes-->set_flag_POST_ready;
+    set_flag_POST_ready-->Sleep_two_minutes;
+    
+```
+
+D --> |yes| E{POST flag triggered && Enough samples?}
+
+## main()
+
+```mermaid
+  flowchart TD
+    A[Start] --> B[init adc timer]
+    B --> C[Init POST request timer]
+    C --> D{adc sample ready?}
+    D --> |no| D
+    D --> |yes| P[reset adc flag] --> E{POST flag triggered && Enough samples?}
+    E --> |no| D
+    E --> |yes| F[reset POST flag]
+    F --> G[collect adc values, date time and calculate average]
+    G --> H[construct json file]
+    H --> I[Post json file to server]
+    I --> J{Error 500?}
+    J --> |yes| K[store string to backup array]
+    J --> |no| L{failed 10 times?}
+    L --> |yes| M[concatenate all json strings and send to fallback server]
+    L --> |no| D
+    M --> N[empty backup array]
+    N --> D
+    K --> L
+    
+    
+```
