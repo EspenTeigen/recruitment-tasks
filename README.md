@@ -2,7 +2,7 @@
 
 ```mermaid
 Read adc thread;
-    Load textfile to array-->loop: read next measurements;
+    "Load textfile to array"-->"loop: read next measurements";
     A-->C;
     B-->D;
     C-->D;
