@@ -288,8 +288,8 @@ void *pubToPOST(void *vargp){
     while(1){
         pthread_mutex_lock(&post_lock);
         //Rais flag to tell if test in main to post data
-        sendDataPOST = 0x01;
         sleep(INTERVAL_TO_POST_REQUEST_SEC);
+        sendDataPOST = 0x01;
         pthread_mutex_unlock(&post_lock);
     }
 }
