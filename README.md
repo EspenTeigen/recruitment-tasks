@@ -21,5 +21,8 @@ In main there is a test for that flag, and when it is triggered the calculations
 the server. If the server failes, the json string is stored in an array, and when there is 10 elements in the array, this is sent to the
 fallback server and the array is emptied. 
 
+##Compiling
+There is a makefile and also a tasks.json file if vscode is used. Dependencies are GCC and curl
+
 
 
