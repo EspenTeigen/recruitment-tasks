@@ -1,8 +1,8 @@
 # recruitment-tasks
 
 ```mermaid
-graph TD;
-    A-->B;
+Read adc thread;
+    Load textfile to array-->loop: read next measurements;
     A-->C;
     B-->D;
     C-->D;
