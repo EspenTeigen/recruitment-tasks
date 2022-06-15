@@ -67,7 +67,7 @@ int initpubToPOSTTimer();
 void *pubToPOST(void * vargp);
 void createJSON(temperatureMeasurement * measurement, char * string, int size_of_string);
 void getDateTimeISO8601(char * dateTime, int sizeDateTime);
-int POSTMeasurement(const char * URL, char * measurement_json, int size);
+int POSTMeasurement(const char * URL, char * measurement_json);
 
 //used to store previous json strings that failed to be sent
 typedef struct PreviousJsonString{
@@ -107,7 +107,9 @@ int main()
             convertToCelsius(&tempMeas);
             adc_ready = 0x00;
         }
-        if(sendDataPOST){
+
+        //Check if ready to post and that there is enough samples to give a propper average
+        if(sendDataPOST && tempMeas.number_of_measurements >= 10){
             
             //keep track on failing to send
             static uint8_t errSend = 0x00;
@@ -129,38 +131,60 @@ int main()
             //construct json
             char measurement_json[MAX_JSON_STRING_SIZE];
             createJSON(&tm_copy, measurement_json, MAX_JSON_STRING_SIZE);
-            
-            //Start to fill up array with previous measurements
-            if(prevJsonStr.N_elements < N_OLD_JSON_STRINGS){
-                strcpy(prevJsonStr.previous_json_string[prevJsonStr.N_elements], measurement_json);
-                prevJsonStr.N_elements++;
-
-            }
-            else{
-                //When array is full, shift array to the right and add new value
-                char buff[MAX_JSON_STRING_SIZE];
-                int i;
-                for(i = 1; i < N_OLD_JSON_STRINGS; i++){
-
-                    memmove(buff, prevJsonStr.previous_json_string[i-1], strlen(buff));
-                    memmove(prevJsonStr.previous_json_string[i], buff, strlen(prevJsonStr.previous_json_string[i]));
-
-                }
-                strcpy(prevJsonStr.previous_json_string[0], measurement_json);
-            }
-
-            int i;
-            for(i = 0; i < prevJsonStr.N_elements; i++){
-                printf("\n%s\n", prevJsonStr.previous_json_string[i]);
-            }
-          
-
-            static const char * POST_URL = "http://localhos¨t:5000/api/temperature";
+        
+            //This could probably be done more elegant by putting it in a textfile
+            static const char * POST_URL = "http://localhost:5000/api/temperature";
             static const char * FALLBACK_URL = "http://localhost:5000/api/temperature/missing";            
 
-            
-            if(POSTMeasurement(POST_URL ,measurement_json, sizeof(measurement_json))){
+            //Check if POST failed last time, if it has use fallback server
+            if(prevJsonStr.N_elements > 0) {
                 
+                //String used to store combined strings, make sure there is no residual 
+                //values in memory from last round
+                char failed_measurement_combined[10*MAX_JSON_STRING_SIZE] = {"\0, \0, \0, \0, \0, \0, \0, \0, \0, \0, "};
+                int i;
+              
+                //Combine all continuose failed attempts
+                for(i = 0; i < prevJsonStr.N_elements; i++){
+                    //Concatenate all strings in array
+                    strcat(failed_measurement_combined, prevJsonStr.previous_json_string[i]);
+                    strcat(failed_measurement_combined, "\n");
+                    //Empty the array space
+                    strcpy(prevJsonStr.previous_json_string[i], "\0");
+                }
+
+                //Since strings in array is removed, set counter to zero
+                prevJsonStr.N_elements = 0;
+                //Send combined string to fallback server
+                POSTMeasurement(FALLBACK_URL, failed_measurement_combined);
+                
+            }
+            else if(POSTMeasurement(POST_URL ,measurement_json)){
+                //Send data to temperature, if it fails, store value and send on the next 
+                //two minute interval
+          
+                //start to fill up array with old values, increment amount of elements in array
+                if(prevJsonStr.N_elements < N_OLD_JSON_STRINGS){
+
+                    strcpy(prevJsonStr.previous_json_string[prevJsonStr.N_elements], measurement_json);
+                    prevJsonStr.N_elements++;
+
+                }
+                else{
+                    //When array is full, shift array to the right and add new value
+                    //This way we keep the freshest values, If we want to keep the 
+                    //10 first we could not send or the 10 last depends on the system
+                    //This is an arbitrary choise
+                    char buff[MAX_JSON_STRING_SIZE];
+                    int i;
+                    for(i = 1; i < N_OLD_JSON_STRINGS; i++){
+
+                        strcpy(buff, prevJsonStr.previous_json_string[i-1]);
+                        strcpy(prevJsonStr.previous_json_string[i], buff);
+
+                    }
+                    strcpy(prevJsonStr.previous_json_string[0], measurement_json);
+                }
             }
         }
     }
@@ -168,12 +192,13 @@ int main()
 }
 
 
-
+//Takes the calculations that has been done on adc values and converts it to a raw json string
 void createJSON(temperatureMeasurement * measurement, char * string, int size_of_string){
     
     char buffer[size_of_string];
-    //Format data to json raw string
-    sprintf(buffer, "{\n\"time\": {\n\"start\": \"%s\", \n	\"end\": \"%s\" \n	},\n	\"min\": %.2f, \n	\"max\": %.2f, \n	\"avg\": %.2f\n}",
+    //Format data to json raw string, probably more elegant to keep json string in textfile and
+    //and use a json library to parse it, but that is not a v ery embedded thing to do
+    sprintf(buffer, "{\n\"time\":{\n\t\"start\" : \"%s\", \n\t\"end\" : \"%s\" \n\t},\n	\"min\" : %.2f, \n\t\"max\" : %.2f,\t\n	\"avg\" : %.2f\n}",
             measurement->start, measurement->end, measurement->min, measurement->max, measurement->average);
 
     memcpy(string, buffer, size_of_string);
@@ -181,7 +206,7 @@ void createJSON(temperatureMeasurement * measurement, char * string, int size_of
 }
 
 
-
+//Init thread that control when adc sample is ready
 int initReadADCTimer(char * filename){
     //Create mutex to block write access
     if (pthread_mutex_init(&adc_lock, NULL) != 0)
@@ -196,7 +221,7 @@ int initReadADCTimer(char * filename){
 }
 
 
-
+//Init thread that control the time when a POST should be done
 int initpubToPOSTTimer(){
 
     //Create mutex to block write access
@@ -211,6 +236,8 @@ int initpubToPOSTTimer(){
     return 0;
 }
 
+
+//import measurement values from file and store in global array
 void getAllADCTemperatureFromFile(char * filename){
 
     char line[10];
@@ -292,7 +319,9 @@ void convertToCelsius(temperatureMeasurement * measurement){
 }
 
 
-
+/*
+---------------- Thread that sets bit to trigger POST in main thread
+*/
 void *pubToPOST(void *vargp){
     while(1){
         pthread_mutex_lock(&post_lock);
@@ -304,19 +333,20 @@ void *pubToPOST(void *vargp){
 }
 
 
-
+//Convert date time to right format
 void getDateTimeISO8601(char * dateTime, int sizeDateTime){
 
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
     char buffer[sizeDateTime];
-    strftime(buffer, sizeDateTime, "%Y-%m-%dT%H:%M:%S.000%z", tm);
+    strftime(buffer, sizeDateTime, "%Y-%m-%dT%H:%M:%S", tm);
     strcpy(dateTime, buffer);
 }
 
 
 
-int POSTMeasurement(const char * URL, char * measurement_json, int size){
+//Function to make a post request, takes a url * string and json string as input
+int POSTMeasurement(const char * URL, char * measurement_json){
 
     CURL *curl;
     CURLcode res;
@@ -343,9 +373,11 @@ int POSTMeasurement(const char * URL, char * measurement_json, int size){
         //Send data 
         res = curl_easy_perform(curl);
 
-        //Check for error 500, return error if present
-        if(res == CURLE_HTTP_RETURNED_ERROR && strstr(error_buf, "500")){
-            printf("%s\n", error_buf);
+    
+        ///if it contains error 500, send err that fallback server needs to be used in next itteration
+        //I do not check for other errors since i'm asked to only do error handling on 500
+        if(strstr(error_buf, "500")){
+            printf("\nCannot connect to server\n Error is: %s\n", error_buf);
             return 1;
         }
     }
