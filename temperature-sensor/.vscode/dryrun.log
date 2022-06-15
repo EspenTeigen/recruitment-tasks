@@ -1,0 +1,5 @@
+make --dry-run --keep-going --print-directory
+make: Entering directory '/home/espen/projects/recruitment-tasks/temperature-sensor'
+gcc -g main.c -o main -pthread -lm -lcurl
+make: Leaving directory '/home/espen/projects/recruitment-tasks/temperature-sensor'
+ 
