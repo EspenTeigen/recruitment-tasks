@@ -1,5 +1,7 @@
 # Temperature Sensor
 
+Compile with Os flag instead of g to go from 40k to 20k executable size
+
 You're free to solve the task using whatever programming language you prefer, but I recommend that you choose a language you are comfortable with.
 Functional code should be delivered in a git repository with working commits.
 
