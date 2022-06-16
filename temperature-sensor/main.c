@@ -315,6 +315,8 @@ int POSTMeasurement(const char * URL, char * measurement_json){
     char error_buf[CURL_ERROR_SIZE];
     curl = curl_easy_init();
     if(curl) {
+            
+        //========================Set options for libcurl===================================
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST"); //tell curl that we want to post
         curl_easy_setopt(curl, CURLOPT_URL, URL);  //URL to server and api
         curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);  //Turn on error feedback so we can catch the 500 error
@@ -326,7 +328,9 @@ int POSTMeasurement(const char * URL, char * measurement_json){
         headers = curl_slist_append(headers, "Content-Type: application/json");
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, measurement_json); //json string to be sent over https
-        res = curl_easy_perform(curl); //Send data and store response from server
+            
+        //=========================Send data and get response from server===============
+        res = curl_easy_perform(curl);
 
         ///if it contains error 500, send err that fallback server needs to be used in next itteration
         //I do not check for other errors since i'm asked to only do error handling on 500
