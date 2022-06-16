@@ -47,8 +47,6 @@ graph TD;
     
 ```
 
-D --> |yes| E{POST flag triggered && Enough samples?}
-
 ## main()
 
 ```mermaid
